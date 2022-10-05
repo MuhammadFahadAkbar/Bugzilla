@@ -1,84 +1,104 @@
 # frozen_string_literal: true
 
 class BugsController < ApplicationController
-  before_action :authenticate_user!
-  before_action :fetch_bug, only: %i[create]
-  before_action :resolved_or_completed, only: [:markcomplete]
+  include Bugconcerns
+
+  before_action :original_project, only: %i[new create update destroy]
+  before_action :current_project, only: %i[edit show]
 
   def new
     @bug = Bug.new
-    @project = Project.find(params[:project_id])
   end
 
-  def edit
-    @bug = Bug.find(params[:project_id])
-    @project = Project.find(params[:id])
-  end
+  def edit; end
 
-  def show
-    @bug = Bug.find(params[:project_id])
-  end
+  def show; end
 
   def create
+    current_user_bug
     authorize @bug
-    if @bug.save
-      redirect_to project_path(@project)
-    else
-      render :new
+
+    respond_to do |format|
+      if @bug.save
+        format.html { redirect_to project_path(@project), notice: ' New bug has been added to this project ' }
+        format.json { render :show, status: :created, location: @project }
+      else
+        format.html do
+          flash[:alert] = 'Bug was not created'
+          render 'new'
+        end
+        format.json { render json: @bug.errors, status: :unprocessable_entity }
+      end
     end
   end
 
   def update
-    @project = Project.find(params[:project_id])
     @bug = Bug.find(params[:id])
     authorize @bug
-    @bug.update(bug_params)
-    redirect_to @project
+    respond_to do |format|
+      if @bug.update(bug_params)
+        format.html { redirect_to @project, notice: ' Bug was updated successfully ' }
+        format.json { render :show, status: :ok, location: @project }
+      else
+        format.html do
+          flash[:alert] = 'Bug was not updated'
+          render 'edit'
+        end
+        format.json { render json: @bug.errors, status: :unprocessable_entity }
+      end
+    end
   end
 
   def destroy
-    @project = Project.find(params[:project_id])
     @bug = @project.bugs.find(params[:id])
     authorize @bug
-    @bug.destroy
-    redirect_to project_path(@project)
+    respond_to do |format|
+      if @bug.destroy
+        format.html { redirect_to project_path(@project), notice: ' Bug was deleted successfully ' }
+        format.json { head :no_content }
+      else
+        format.html { redirect_to project_path(@project), notice: ' Bug was not deleted ' }
+        format.json { render json: @bug.errors, status: :unprocessable_entity }
+      end
+    end
   end
 
   def assign
-    @bug = Bug.find(params[:bid])
+    developer_bug
     @bug.dev_id = current_user.id
     @bug.status = 1
-    @bug.save
-    @project = Project.find(params[:pid])
-    redirect_to @project
+    respond_to do |format|
+      if @bug.save
+        format.html { redirect_to @project, notice: ' Bug has been assigned to you ' }
+        format.json { render :show, status: :ok, location: @project }
+      else
+        format.html { redirect_to project_path(params[:pid]), notice: ' Bug was not assigned ' }
+        format.json { render json: @bug.errors, status: :unprocessable_entity }
+      end
+    end
   end
 
   def markcomplete
-    @project = Project.find(params[:pid])
-    redirect_to @project
+    developer_bug
+    @bug.status = if @bug.bugtype == 'bug'
+                    2
+                  else
+                    3
+                  end
+    respond_to do |format|
+      if @bug.save
+        format.html { redirect_to @project, notice: ' Bug has been completed ' }
+        format.json { render :show, status: :ok, location: @project }
+      else
+        format.html { redirect_to @project, notice: ' Bug was not completed ' }
+        format.json { render json: @bug.errors, status: :unprocessable_entity }
+      end
+    end
   end
 
   private
 
   def bug_params
     params.require(:bug).permit(:title, :description, :deadline, :screenshot, :bugtype, :status)
-  end
-
-  def resolved_or_completed
-    @bug = Bug.find(params[:bid])
-    @bug.user_id = current_user.id
-    @bug.status = if @bug.bugtype == 'Bug'
-                    2
-                  else
-                    3
-                  end
-    @bug.save
-  end
-
-  def fetch_bug
-    @user = User.find(current_user.id)
-    @project = Project.find(params[:project_id])
-    @bug = @project.bugs.new(bug_params)
-    @bug.user_id = current_user.id
   end
 end
